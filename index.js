@@ -1557,10 +1557,10 @@ function normalizeUserProjectUi(uiInput) {
   }
   const panelDock = {
     ...defaultUserProjectUi.panelDock,
-    ...(ui.panelDock || {}),
   }
   for (const panelId of Object.keys(defaultUserProjectUi.panelDock)) {
-    panelDock[panelId] = panelDock[panelId] === 'right' ? 'right' : 'left'
+    const requestedSide = ui.panelDock?.[panelId]
+    panelDock[panelId] = requestedSide === 'right' ? 'right' : defaultUserProjectUi.panelDock[panelId]
   }
   ui.panelDock = panelDock
 
@@ -1581,7 +1581,7 @@ function normalizeUserProjectUi(uiInput) {
 
   if (hasLegacyPanelFlags && !hasExplicitSidebarState) {
     const oldLeftPanels = ['camera', 'preview'].filter((panelId) => Boolean(ui[`${panelId}Open`]))
-    const oldRightPanels = ['account', 'settings', 'templates', 'fields', 'inspector'].filter((panelId) => Boolean(ui[`${panelId}Open`]))
+    const oldRightPanels = ['settings', 'templates', 'fields', 'inspector'].filter((panelId) => Boolean(ui[`${panelId}Open`]))
     ui.leftSidebarOpen = oldLeftPanels.length > 0
     ui.rightSidebarOpen = oldRightPanels.length > 0
     ui.leftActivePanel = oldLeftPanels[0] || defaultUserProjectUi.leftActivePanel

@@ -1,4 +1,4 @@
-export const panelIds = ['preview', 'camera', 'search', 'templates', 'inspector', 'fields', 'settings', 'collaborators', 'account']
+export const panelIds = ['preview', 'camera', 'search', 'templates', 'inspector', 'fields', 'settings', 'collaborators']
 
 export const defaultPanelDock = {
   preview: 'left',
@@ -9,7 +9,6 @@ export const defaultPanelDock = {
   fields: 'right',
   settings: 'right',
   collaborators: 'right',
-  account: 'right',
 }
 
 export const defaultProjectSettings = {
