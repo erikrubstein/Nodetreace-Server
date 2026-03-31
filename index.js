@@ -14,10 +14,11 @@ import { registerSessionRoutes } from './routes/sessionRoutes.js'
 import { defaultProjectSettings, defaultUserProjectUi } from './shared/projectDefaults.js'
 
 const app = express()
-const port = Number(process.env.PORT || 3001)
-const host = process.env.HOST || '0.0.0.0'
 const serverDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRootDir = serverDir
+loadEnvFile(path.join(repoRootDir, '.env'))
+const port = Number(process.env.PORT || 3001)
+const host = process.env.HOST || '0.0.0.0'
 const dataDir = process.env.NODETRACE_DATA_DIR
   ? path.resolve(process.env.NODETRACE_DATA_DIR)
   : path.join(repoRootDir, 'data')
@@ -27,7 +28,6 @@ const dbPath = path.join(dataDir, 'database.db')
 const distDir = process.env.NODETRACE_WEB_DIST
   ? path.resolve(process.env.NODETRACE_WEB_DIST)
   : path.join(repoRootDir, 'dist')
-loadEnvFile(path.join(repoRootDir, '.env'))
 const projectEventClients = new Map()
 const activeDesktopSessions = new Map()
 const activeMobileConnections = new Map()
