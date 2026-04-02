@@ -499,8 +499,10 @@ const getAccessibleProjectRow = db.prepare(`
   SELECT
     p.*,
     owner.username AS owner_username,
+    COUNT(CASE WHEN n.variant_of_id IS NULL THEN 1 END) AS node_count,
     CASE WHEN p.owner_user_id = @user_id THEN 1 ELSE 0 END AS is_owner
   FROM projects p
+  LEFT JOIN nodes n ON n.project_id = p.id
   LEFT JOIN users owner ON owner.id = p.owner_user_id
   WHERE p.id = @project_id
     AND (
@@ -512,6 +514,7 @@ const getAccessibleProjectRow = db.prepare(`
           AND pc.user_id = @user_id
       )
     )
+  GROUP BY p.id
 `)
 const listProjectCollaborators = db.prepare(`
   SELECT u.id, u.username
