@@ -2215,6 +2215,18 @@ function serializeProject(row, userId) {
   }
 }
 
+function buildVersionedUploadUrl(relativePath, versionToken = '') {
+  const normalizedPath = String(relativePath || '').trim().replaceAll('\\', '/')
+  if (!normalizedPath) {
+    return null
+  }
+  const normalizedVersion = String(versionToken || '').trim()
+  if (!normalizedVersion) {
+    return `/uploads/${normalizedPath}`
+  }
+  return `/uploads/${normalizedPath}?v=${encodeURIComponent(normalizedVersion)}`
+}
+
 function serializeNodeMedia(row) {
   return {
     id: row.id,
@@ -2226,8 +2238,8 @@ function serializeNodeMedia(row) {
     imageEdits: normalizeNodeImageEdits(JSON.parse(row.image_edits_json || '{}')),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    imageUrl: row.image_path ? `/uploads/${row.image_path.replaceAll('\\', '/')}` : null,
-    previewUrl: row.preview_path ? `/uploads/${row.preview_path.replaceAll('\\', '/')}` : null,
+    imageUrl: buildVersionedUploadUrl(row.image_path, row.updated_at || row.created_at || ''),
+    previewUrl: buildVersionedUploadUrl(row.preview_path, row.updated_at || row.created_at || ''),
   }
 }
 
@@ -2255,8 +2267,8 @@ function serializeNode(row, _collapsedMap = null, identification = null, mediaRo
     isVariant: row.variant_of_id != null,
     identification,
     hasImage: Boolean(primaryMedia?.imageUrl || row.image_path),
-    imageUrl: primaryMedia?.imageUrl || (row.image_path ? `/uploads/${row.image_path.replaceAll('\\', '/')}` : null),
-    previewUrl: primaryMedia?.previewUrl || (row.preview_path ? `/uploads/${row.preview_path.replaceAll('\\', '/')}` : null),
+    imageUrl: primaryMedia?.imageUrl || buildVersionedUploadUrl(row.image_path, row.updated_at || row.created_at || ''),
+    previewUrl: primaryMedia?.previewUrl || buildVersionedUploadUrl(row.preview_path, row.updated_at || row.created_at || ''),
     primaryMediaId: primaryMedia?.id || null,
     mediaCount: media.length,
     media,

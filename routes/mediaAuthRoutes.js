@@ -65,6 +65,8 @@ export function registerMediaAuthRoutes(app, ctx) {
         return res.status(404).json({ error: 'File not found' })
       }
 
+      res.setHeader('Cache-Control', 'private, max-age=31536000, immutable')
+      res.vary('Cookie')
       return res.sendFile(absolutePath)
     } catch (error) {
       return next(error)
