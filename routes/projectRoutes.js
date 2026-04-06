@@ -35,6 +35,7 @@ export function registerProjectRoutes(app, ctx) {
     getProjectCollaborator,
     insertProjectCollaborator,
     deleteProjectCollaboratorStmt,
+    updateProjectAccess,
     setProjectCollapsedState,
     activeDesktopSessions,
     activeMobileConnections,
@@ -287,6 +288,7 @@ export function registerProjectRoutes(app, ctx) {
       const project = assertProjectAccess(req.params.id, req.user.id)
       res.json({
         owner: project.owner_user_id ? { id: project.owner_user_id, username: project.owner_username } : null,
+        isPublic: Boolean(project.is_public),
         collaborators: listProjectCollaborators.all(project.id),
         canManageUsers: project.owner_user_id === req.user.id,
       })
@@ -298,6 +300,9 @@ export function registerProjectRoutes(app, ctx) {
   app.post('/api/projects/:id/collaborators', requireAuth, (req, res, next) => {
     try {
       const project = assertProjectOwner(req.params.id, req.user.id)
+      if (project.is_public) {
+        return res.json({ ok: false, error: 'Public projects do not use collaborators' })
+      }
       const username = normalizeUsername(req.body?.username)
       const collaborator = getUserByUsername.get(username)
       if (!collaborator) {
@@ -317,6 +322,7 @@ export function registerProjectRoutes(app, ctx) {
       res.status(201).json({
         ok: true,
         owner: project.owner_user_id ? { id: project.owner_user_id, username: project.owner_username } : null,
+        isPublic: false,
         collaborators: listProjectCollaborators.all(project.id),
         canManageUsers: true,
       })
@@ -328,12 +334,30 @@ export function registerProjectRoutes(app, ctx) {
   app.delete('/api/projects/:id/collaborators/:userId', requireAuth, (req, res, next) => {
     try {
       const project = assertProjectOwner(req.params.id, req.user.id)
+      if (project.is_public) {
+        return res.json({ ok: false, error: 'Public projects do not use collaborators' })
+      }
       deleteProjectCollaboratorStmt.run(project.id, String(req.params.userId || '').trim())
       res.json({
         owner: project.owner_user_id ? { id: project.owner_user_id, username: project.owner_username } : null,
+        isPublic: false,
         collaborators: listProjectCollaborators.all(project.id),
         canManageUsers: true,
       })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.patch('/api/projects/:id/access', requireAuth, (req, res, next) => {
+    try {
+      const project = assertProjectOwner(req.params.id, req.user.id)
+      updateProjectAccess({
+        id: project.id,
+        isPublic: Boolean(req.body?.isPublic),
+      })
+      broadcastProjectEvent(project.id)
+      res.json(serializeProject(assertProjectAccess(project.id, req.user.id), req.user.id))
     } catch (error) {
       next(error)
     }

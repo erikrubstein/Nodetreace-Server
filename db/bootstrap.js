@@ -23,6 +23,7 @@ function createTextSchema(db) {
       name TEXT NOT NULL,
       description TEXT DEFAULT '',
       settings_json TEXT DEFAULT '{}',
+      is_public INTEGER NOT NULL DEFAULT 0,
       openai_api_key_encrypted TEXT,
       openai_api_key_mask TEXT,
       created_at TEXT NOT NULL,
@@ -539,6 +540,9 @@ function ensureAuthSchema(db) {
   const projectColumns = db.prepare(`PRAGMA table_info(projects)`).all()
   if (!projectColumns.some((column) => column.name === 'owner_user_id')) {
     db.exec(`ALTER TABLE projects ADD COLUMN owner_user_id TEXT`)
+  }
+  if (!projectColumns.some((column) => column.name === 'is_public')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0`)
   }
   if (!projectColumns.some((column) => column.name === 'openai_api_key_encrypted')) {
     db.exec(`ALTER TABLE projects ADD COLUMN openai_api_key_encrypted TEXT`)

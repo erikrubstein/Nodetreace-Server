@@ -306,10 +306,10 @@ const db = initializeDatabase({
 
 const insertProject = db.prepare(`
   INSERT INTO projects (
-    id, name, description, settings_json, openai_api_key_encrypted, openai_api_key_mask, owner_user_id, created_at, updated_at
+    id, name, description, settings_json, is_public, openai_api_key_encrypted, openai_api_key_mask, owner_user_id, created_at, updated_at
   )
   VALUES (
-    @id, @name, @description, @settings_json, @openai_api_key_encrypted, @openai_api_key_mask, @owner_user_id, @created_at, @updated_at
+    @id, @name, @description, @settings_json, @is_public, @openai_api_key_encrypted, @openai_api_key_mask, @owner_user_id, @created_at, @updated_at
   )
 `)
 
@@ -486,6 +486,7 @@ const listAccessibleProjects = db.prepare(`
   LEFT JOIN nodes n ON n.project_id = p.id
   LEFT JOIN users owner ON owner.id = p.owner_user_id
   WHERE p.owner_user_id = @user_id
+     OR p.is_public = 1
      OR EXISTS (
        SELECT 1
        FROM project_collaborators pc
@@ -507,6 +508,7 @@ const getAccessibleProjectRow = db.prepare(`
   WHERE p.id = @project_id
     AND (
       p.owner_user_id = @user_id
+      OR p.is_public = 1
       OR EXISTS (
         SELECT 1
         FROM project_collaborators pc
@@ -772,6 +774,12 @@ const updateProjectSettingsStmt = db.prepare(`
       updated_at = @updated_at
   WHERE id = @id
 `)
+const updateProjectAccessStmt = db.prepare(`
+  UPDATE projects
+  SET is_public = @is_public,
+      updated_at = @updated_at
+  WHERE id = @id
+`)
 const updateProjectMetaStmt = db.prepare(`
   UPDATE projects
   SET name = @name,
@@ -913,7 +921,7 @@ function assertNodeMedia(nodeId, mediaId) {
   return media
 }
 
-const createProjectWithRoot = db.transaction(({ name, description, owner_user_id }) => {
+const createProjectWithRoot = db.transaction(({ name, description, owner_user_id, is_public = 0 }) => {
   const now = new Date().toISOString()
   const projectId = generateUniqueId((candidate) => Boolean(getProject.get(candidate)))
   insertProject.run({
@@ -921,6 +929,7 @@ const createProjectWithRoot = db.transaction(({ name, description, owner_user_id
     name,
     description,
     settings_json: JSON.stringify(defaultProjectSettings),
+    is_public: is_public ? 1 : 0,
     openai_api_key_encrypted: null,
     openai_api_key_mask: null,
     owner_user_id: owner_user_id || null,
@@ -958,6 +967,16 @@ const updateProjectSettings = db.transaction(({ id, settings }) => {
   updateProjectSettingsStmt.run({
     id,
     settings_json: JSON.stringify(settings),
+    updated_at: now,
+  })
+})
+
+const updateProjectAccess = db.transaction(({ id, isPublic }) => {
+  assertProject(id)
+  const now = new Date().toISOString()
+  updateProjectAccessStmt.run({
+    id,
+    is_public: isPublic ? 1 : 0,
     updated_at: now,
   })
 })
@@ -1342,11 +1361,7 @@ const mergeNodeIntoTargetMedia = db.transaction(({ sourceNodeId, targetNodeId, p
 const extractNodeMediaToSibling = db.transaction(({ nodeId, mediaId, projectId, ownerUserId }) => {
   const sourceNode = assertNode(nodeId)
   ensureNodeBelongsToProject(sourceNode, projectId)
-  if (sourceNode.parent_id == null) {
-    const error = new Error('The root node cannot receive sibling photo nodes')
-    error.status = 400
-    throw error
-  }
+  ensureCanHaveChildren(sourceNode)
 
   const media = assertNodeMedia(nodeId, mediaId)
   if (!media.image_path) {
@@ -1359,7 +1374,7 @@ const extractNodeMediaToSibling = db.transaction(({ nodeId, mediaId, projectId, 
   const newNodeId = createNode({
     project_id: projectId,
     owner_user_id: ownerUserId || sourceNode.owner_user_id || null,
-    parent_id: sourceNode.parent_id,
+    parent_id: sourceNode.id,
     variant_of_id: null,
     type: 'photo',
     name: createUntitledName(),
@@ -2205,6 +2220,7 @@ function serializeProject(row, userId) {
     node_count: Math.max(0, Number(row.node_count || 0)),
     ownerUserId: row.owner_user_id || null,
     ownerUsername: row.owner_username || null,
+    isPublic: Boolean(row.is_public),
     canManageUsers: Boolean(userId && row.owner_user_id === userId),
     openAiApiKeyConfigured: Boolean(row.openai_api_key_encrypted),
     openAiApiKeyMask: row.openai_api_key_mask || '',
@@ -3039,6 +3055,10 @@ function restoreProjectFromArchive(projectId, archivePath) {
       settings_json: JSON.stringify(normalizeProjectSettings(manifest.project?.settings)),
       updated_at: now,
     })
+    updateProjectAccess({
+      id: projectId,
+      isPublic: Boolean(manifest.project?.isPublic ?? manifest.project?.is_public),
+    })
 
     deleteIdentificationTemplatesByProjectStmt.run(projectId)
     const templateIdMap = new Map()
@@ -3372,6 +3392,7 @@ function importProjectArchive(archivePath, projectNameOverride = '', ownerUserId
         'Imported Project',
       description: String(manifest.project?.description || '').trim(),
       owner_user_id: ownerUserId,
+      is_public: Boolean(manifest.project?.isPublic ?? manifest.project?.is_public),
     })
 
     if (manifest.project?.settings) {
@@ -3760,6 +3781,7 @@ const serverContext = {
   updateNode,
   updatePasswordStmt,
   updateProjectOpenAiKey,
+  updateProjectAccess,
   updateProjectTimestamp,
   updateUsernameStmt,
   upsertNodeIdentification,
