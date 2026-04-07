@@ -2,10 +2,13 @@
 
 Standalone backend for Nodetrace.
 
+Shared architecture notes live in [../architecture.md](../architecture.md).
+
 ## Responsibilities
 
 - local account authentication and sessions
 - project, node, collaborator, and media APIs
+- public/private project visibility enforcement
 - SQLite persistence and file storage
 - optional hosting of the built web UI
 
@@ -41,3 +44,5 @@ That path is configured in the server repo `.env` so the backend can use the exi
 By default the server stores runtime data in `./data` and serves hosted web assets from `./dist`.
 
 The server repo does not invoke client repo scripts. If you want to host the web UI from the server, build and deploy the frontend bundle into `./dist` or point `NODETRACE_WEB_DIST` at a deployed bundle path.
+
+Uploaded media is served with versioned URLs and strong private cache headers so desktop and web clients can reuse cached previews without serving stale images after an update.
