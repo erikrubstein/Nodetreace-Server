@@ -25,6 +25,7 @@ export function registerMediaAuthRoutes(app, ctx) {
     activeDesktopSessions,
     activeMobileConnections,
     clearAuthCookie,
+    updateSessionCaptureIdStmt,
     updateUsernameStmt,
     updatePasswordStmt,
     countOwnedProjectsByUserStmt,
@@ -226,6 +227,27 @@ export function registerMediaAuthRoutes(app, ctx) {
       })
 
       res.status(204).send()
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/account/capture-session', requireAuth, (req, res, next) => {
+    try {
+      const captureSessionId = generateUniqueId((candidate) => Boolean(getSessionByCaptureId.get(candidate)))
+      updateSessionCaptureIdStmt.run({
+        id: req.user.authSessionId,
+        capture_session_id: captureSessionId,
+        updated_at: new Date().toISOString(),
+      })
+      activeDesktopSessions.delete(req.user.captureSessionId)
+      activeMobileConnections.delete(req.user.captureSessionId)
+      res.json({
+        ok: true,
+        id: req.user.id,
+        username: req.user.username,
+        captureSessionId,
+      })
     } catch (error) {
       next(error)
     }

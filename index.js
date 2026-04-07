@@ -460,6 +460,12 @@ const updateSessionTimestampStmt = db.prepare(`
   SET updated_at = @updated_at
   WHERE id = @id
 `)
+const updateSessionCaptureIdStmt = db.prepare(`
+  UPDATE user_sessions
+  SET capture_session_id = @capture_session_id,
+      updated_at = @updated_at
+  WHERE id = @id
+`)
 const deleteSessionStmt = db.prepare(`DELETE FROM user_sessions WHERE id = ?`)
 const listSessionsByUserStmt = db.prepare(`SELECT * FROM user_sessions WHERE user_id = ?`)
 const deleteSessionsByUserStmt = db.prepare(`DELETE FROM user_sessions WHERE user_id = ?`)
@@ -3773,6 +3779,7 @@ const serverContext = {
   serializeNodeForUser,
   serializeProject,
   setAuthCookie,
+  updateSessionCaptureIdStmt,
   setPrimaryNodeMedia,
   setNodeCollapsedStateRecursive,
   setProjectCollapsedState,
