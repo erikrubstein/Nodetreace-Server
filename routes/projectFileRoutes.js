@@ -24,7 +24,6 @@ export function importRestorePayloadRoutes(app, ctx) {
     addNodeMedia,
     parseTags,
     createUntitledName,
-    resolveVariantAnchor,
     serializeNodeForUser,
     upsertNodeIdentification,
     upsertUserNodeCollapsePreference,
@@ -48,14 +47,11 @@ export function importRestorePayloadRoutes(app, ctx) {
     const uploadMode = String(body.uploadMode || body.mode || '').trim().toLowerCase()
     const additionalPhotoRequested =
       uploadMode === 'additional_photo' ||
-      String(body.additionalPhoto || '').trim() === 'true' ||
-      String(body.variant || '').trim() === 'true'
+      String(body.additionalPhoto || '').trim() === 'true'
     const additionalPhotoOfId =
       body.additionalPhotoOfId != null
         ? String(body.additionalPhotoOfId).trim()
-        : body.variantOfId != null
-          ? String(body.variantOfId).trim()
-          : null
+        : null
 
     return { additionalPhotoRequested, additionalPhotoOfId }
   }
@@ -94,7 +90,6 @@ export function importRestorePayloadRoutes(app, ctx) {
         project_id: projectId,
         owner_user_id: req.user.id,
         parent_id: parentNode.id,
-        variant_of_id: null,
         type: 'folder',
         name,
         notes: String(req.body.notes || '').trim(),
@@ -257,7 +252,7 @@ export function importRestorePayloadRoutes(app, ctx) {
       const clientId = String(req.body.clientId || '').trim()
       const { additionalPhotoRequested, additionalPhotoOfId } = resolvePhotoUploadIntent(req.body)
       let parentId = String(req.body.parentId || '').trim() || null
-      let variantOfId = additionalPhotoOfId
+      let additionalPhotoNodeId = additionalPhotoOfId
       if (!parentId && clientId) {
         if (clientId !== req.user.captureSessionId) {
           return res.status(403).json({ error: 'Session mismatch' })
@@ -270,24 +265,22 @@ export function importRestorePayloadRoutes(app, ctx) {
           return res.status(400).json({ error: 'Selected client is controlling a different project' })
         }
         if (additionalPhotoRequested) {
-          variantOfId = controllingClient.selectedNodeId
+          additionalPhotoNodeId = controllingClient.selectedNodeId
         } else {
           parentId = controllingClient.selectedNodeId
         }
       }
 
-      if (additionalPhotoRequested || variantOfId) {
-        const rawAnchorNode = assertNode(variantOfId)
-        ensureNodeBelongsToProject(rawAnchorNode, projectId)
-        const anchorNode = resolveVariantAnchor(rawAnchorNode)
-        parentId = anchorNode.parent_id
-        variantOfId = anchorNode.id
+      if (additionalPhotoRequested || additionalPhotoNodeId) {
+        const targetNode = assertNode(additionalPhotoNodeId)
+        ensureNodeBelongsToProject(targetNode, projectId)
+        additionalPhotoNodeId = targetNode.id
       }
 
       const parentNode = parentId != null ? assertNode(parentId) : null
       if (parentNode) {
         ensureNodeBelongsToProject(parentNode, projectId)
-        if (!variantOfId) {
+        if (!additionalPhotoNodeId) {
           ensureCanHaveChildren(parentNode)
         }
       }
@@ -311,9 +304,9 @@ export function importRestorePayloadRoutes(app, ctx) {
 
       const template = templateId ? assertIdentificationTemplateAccess(templateId, projectId) : null
 
-      if (additionalPhotoRequested || variantOfId) {
+      if (additionalPhotoRequested || additionalPhotoNodeId) {
         const mediaId = addNodeMedia({
-          nodeId: variantOfId,
+          nodeId: additionalPhotoNodeId,
           projectId,
           imagePath: path.relative(uploadsDir, originalFile.path),
           previewPath: previewFile ? path.relative(uploadsDir, previewFile.path) : null,
@@ -325,7 +318,7 @@ export function importRestorePayloadRoutes(app, ctx) {
         return res.status(201).json({
           mode: 'additional_photo',
           mediaId,
-          node: serializeNodeForUser(assertNode(variantOfId), req.user.id),
+          node: serializeNodeForUser(assertNode(additionalPhotoNodeId), req.user.id),
         })
       }
 
@@ -336,15 +329,19 @@ export function importRestorePayloadRoutes(app, ctx) {
         project_id: projectId,
         owner_user_id: req.user.id,
         parent_id: parentNode?.id ?? null,
-        variant_of_id: null,
         type: 'photo',
         name: resolvedName,
         notes: String(req.body.notes || '').trim(),
         tags: parseTags(req.body.tags),
-        image_path: path.relative(uploadsDir, originalFile.path),
-        preview_path: previewFile ? path.relative(uploadsDir, previewFile.path) : null,
-        image_edits: imageEdits,
-        original_filename: originalFile.originalname,
+        image_edits: null,
+      })
+      addNodeMedia({
+        nodeId,
+        projectId,
+        imagePath: path.relative(uploadsDir, originalFile.path),
+        previewPath: previewFile ? path.relative(uploadsDir, previewFile.path) : null,
+        originalFilename: originalFile.originalname,
+        imageEdits,
       })
       const collapseTimestamp = new Date().toISOString()
       upsertUserNodeCollapsePreference.run({
@@ -390,20 +387,18 @@ export function importRestorePayloadRoutes(app, ctx) {
       const projectId = project.id
       const { additionalPhotoRequested } = resolvePhotoUploadIntent(req.body)
       let parentId = session.selectedNodeId
-      let variantOfId = null
+      let additionalPhotoNodeId = null
 
       if (additionalPhotoRequested) {
-        const rawAnchorNode = assertNode(session.selectedNodeId)
-        ensureNodeBelongsToProject(rawAnchorNode, projectId)
-        const anchorNode = resolveVariantAnchor(rawAnchorNode)
-        parentId = anchorNode.parent_id
-        variantOfId = anchorNode.id
+        const targetNode = assertNode(session.selectedNodeId)
+        ensureNodeBelongsToProject(targetNode, projectId)
+        additionalPhotoNodeId = targetNode.id
       }
 
       const parentNode = parentId != null ? assertNode(parentId) : null
       if (parentNode) {
         ensureNodeBelongsToProject(parentNode, projectId)
-        if (!variantOfId) {
+        if (!additionalPhotoNodeId) {
           ensureCanHaveChildren(parentNode)
         }
       }
@@ -428,7 +423,7 @@ export function importRestorePayloadRoutes(app, ctx) {
 
       if (additionalPhotoRequested) {
         const mediaId = addNodeMedia({
-          nodeId: variantOfId,
+          nodeId: additionalPhotoNodeId,
           projectId,
           imagePath: path.relative(uploadsDir, originalFile.path),
           previewPath: previewFile ? path.relative(uploadsDir, previewFile.path) : null,
@@ -440,7 +435,7 @@ export function importRestorePayloadRoutes(app, ctx) {
         return res.status(201).json({
           mode: 'additional_photo',
           mediaId,
-          node: serializeNodeForUser(assertNode(variantOfId), null),
+          node: serializeNodeForUser(assertNode(additionalPhotoNodeId), null),
         })
       }
 
@@ -451,15 +446,19 @@ export function importRestorePayloadRoutes(app, ctx) {
         project_id: projectId,
         owner_user_id: session.userId || project.owner_user_id || null,
         parent_id: parentNode?.id ?? null,
-        variant_of_id: null,
         type: 'photo',
         name: resolvedName,
         notes: String(req.body.notes || '').trim(),
         tags: parseTags(req.body.tags),
-        image_path: path.relative(uploadsDir, originalFile.path),
-        preview_path: previewFile ? path.relative(uploadsDir, previewFile.path) : null,
-        image_edits: imageEdits,
-        original_filename: originalFile.originalname,
+        image_edits: null,
+      })
+      addNodeMedia({
+        nodeId,
+        projectId,
+        imagePath: path.relative(uploadsDir, originalFile.path),
+        previewPath: previewFile ? path.relative(uploadsDir, previewFile.path) : null,
+        originalFilename: originalFile.originalname,
+        imageEdits,
       })
       const collapseTimestamp = new Date().toISOString()
       if (session.userId) {

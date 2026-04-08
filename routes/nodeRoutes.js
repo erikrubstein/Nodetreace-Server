@@ -29,9 +29,7 @@ export function registerNodeRoutes(app, ctx) {
     OPENAI_IDENTIFICATION_MODEL,
     setNodeCollapsedStateRecursive,
     ensureNotRoot,
-    ensureNoChildren,
     ensureNodeBelongsToProject,
-    resolveVariantAnchor,
     mergeNodeIntoTargetMedia,
     moveNode,
     ensureCanHaveChildren,
@@ -40,7 +38,7 @@ export function registerNodeRoutes(app, ctx) {
     updateNodeMediaEdits,
     removeNodeMedia,
     setPrimaryNodeMedia,
-    extractNodeMediaToSibling,
+    extractNodeMediaToChild,
     buildTree,
   } = ctx
 
@@ -374,45 +372,21 @@ export function registerNodeRoutes(app, ctx) {
     try {
       const node = assertNodeAccess(req.params.id, req.user.id)
       ensureNotRoot(node)
-      const variantOfId =
-        req.body.additionalPhotoOfId != null
-          ? String(req.body.additionalPhotoOfId).trim()
-          : req.body.variantOfId != null
-            ? String(req.body.variantOfId).trim()
-            : null
       let parentId = req.body.parentId != null ? String(req.body.parentId).trim() : null
 
-      if (variantOfId) {
-        ensureNoChildren(node)
-        const requestedAnchor = assertNode(variantOfId)
-        ensureNodeBelongsToProject(requestedAnchor, node.project_id)
-        const anchorNode = resolveVariantAnchor(requestedAnchor)
-        if (anchorNode.id === node.id) {
-          return res.status(400).json({ error: 'A node cannot become an additional photo of itself' })
-        }
-        parentId = anchorNode.parent_id
-        moveNode({
-          id: node.id,
-          project_id: node.project_id,
-          parent_id: parentId,
-          variant_of_id: anchorNode.id,
-        })
-      } else {
-        if (!parentId) {
-          return res.status(400).json({ error: 'Parent node is required' })
-        }
-        const targetParent = assertNode(parentId)
-        ensureNodeBelongsToProject(targetParent, node.project_id)
-        ensureCanHaveChildren(targetParent)
-        ensureNoCycle(node.id, targetParent.id)
-
-        moveNode({
-          id: node.id,
-          project_id: node.project_id,
-          parent_id: targetParent.id,
-          variant_of_id: null,
-        })
+      if (!parentId) {
+        return res.status(400).json({ error: 'Parent node is required' })
       }
+      const targetParent = assertNode(parentId)
+      ensureNodeBelongsToProject(targetParent, node.project_id)
+      ensureCanHaveChildren(targetParent)
+      ensureNoCycle(node.id, targetParent.id)
+
+      moveNode({
+        id: node.id,
+        project_id: node.project_id,
+        parent_id: targetParent.id,
+      })
 
       broadcastProjectEvent(node.project_id)
       res.json(serializeNodeForUser(assertNode(node.id), req.user.id))
@@ -540,7 +514,7 @@ export function registerNodeRoutes(app, ctx) {
   app.post('/api/nodes/:id/media/:mediaId/extract', requireAuth, (req, res, next) => {
     try {
       const node = assertNodeAccess(req.params.id, req.user.id)
-      const newNodeId = extractNodeMediaToSibling({
+      const newNodeId = extractNodeMediaToChild({
         nodeId: node.id,
         mediaId: String(req.params.mediaId || '').trim(),
         projectId: node.project_id,

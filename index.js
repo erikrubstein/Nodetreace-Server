@@ -103,10 +103,6 @@ function normalizeNodeReviewStatus(input) {
   return 'new'
 }
 
-function nodeHasLegacyMedia(node) {
-  return Boolean(node?.image_path || node?.preview_path || node?.original_filename)
-}
-
 function generateShortId() {
   let value = ID_FIRST_CHARS[Math.floor(Math.random() * ID_FIRST_CHARS.length)]
   for (let index = 1; index < 5; index += 1) {
@@ -315,31 +311,25 @@ const insertProject = db.prepare(`
 
 const insertNode = db.prepare(`
   INSERT INTO nodes (
-    id, project_id, owner_user_id, parent_id, variant_of_id, type, name, notes, tags_json, image_path, preview_path,
-    review_status, needs_attention, image_edits_json, original_filename, added_at, created_at, updated_at
+    id, project_id, owner_user_id, parent_id, type, name, notes, tags_json,
+    review_status, needs_attention, image_edits_json, added_at, created_at, updated_at
   ) VALUES (
-    @id, @project_id, @owner_user_id, @parent_id, @variant_of_id, @type, @name, @notes, @tags_json, @image_path, @preview_path,
-    @review_status, @needs_attention, @image_edits_json, @original_filename, @added_at, @created_at, @updated_at
+    @id, @project_id, @owner_user_id, @parent_id, @type, @name, @notes, @tags_json,
+    @review_status, @needs_attention, @image_edits_json, @added_at, @created_at, @updated_at
   )
 `)
 const getNodeMediaByIdStmt = db.prepare(`SELECT * FROM node_media WHERE id = ?`)
-const getNodeMediaByLegacySourceStmt = db.prepare(`
-  SELECT *
-  FROM node_media
-  WHERE legacy_source_node_id = ?
-`)
 const listNodeMediaByNodeStmt = db.prepare(`
   SELECT *
   FROM node_media
   WHERE node_id = ?
   ORDER BY is_primary DESC, sort_order ASC, created_at ASC, id ASC
 `)
-const insertNodeMediaMirrorStmt = db.prepare(`
+const insertNodeMediaStmt = db.prepare(`
   INSERT INTO node_media (
     id,
     project_id,
     node_id,
-    legacy_source_node_id,
     is_primary,
     sort_order,
     image_edits_json,
@@ -352,7 +342,6 @@ const insertNodeMediaMirrorStmt = db.prepare(`
     @id,
     @project_id,
     @node_id,
-    @legacy_source_node_id,
     @is_primary,
     @sort_order,
     @image_edits_json,
@@ -363,23 +352,9 @@ const insertNodeMediaMirrorStmt = db.prepare(`
     @updated_at
   )
 `)
-const updateNodeMediaMirrorStmt = db.prepare(`
-  UPDATE node_media
-  SET project_id = @project_id,
-      node_id = @node_id,
-      is_primary = @is_primary,
-      sort_order = @sort_order,
-      image_edits_json = @image_edits_json,
-      image_path = @image_path,
-      preview_path = @preview_path,
-      original_filename = @original_filename,
-      updated_at = @updated_at
-  WHERE id = @id
-`)
 const updateNodeMediaPlacementStmt = db.prepare(`
   UPDATE node_media
   SET node_id = @node_id,
-      legacy_source_node_id = @legacy_source_node_id,
       is_primary = @is_primary,
       sort_order = @sort_order,
       updated_at = @updated_at
@@ -391,24 +366,11 @@ const updateNodeMediaEditsStmt = db.prepare(`
       updated_at = @updated_at
   WHERE id = @id
 `)
-const clearNodeLegacyImageFieldsStmt = db.prepare(`
-  UPDATE nodes
-  SET image_path = NULL,
-      preview_path = NULL,
-      original_filename = NULL,
-      image_edits_json = @image_edits_json,
-      updated_at = @updated_at
-  WHERE id = @id
-`)
 const resetNodeMediaPrimaryFlagsStmt = db.prepare(`
   UPDATE node_media
   SET is_primary = 0,
       updated_at = @updated_at
   WHERE node_id = @node_id
-`)
-const deleteNodeMediaByLegacySourceStmt = db.prepare(`
-  DELETE FROM node_media
-  WHERE legacy_source_node_id = ?
 `)
 const deleteNodeMediaByIdStmt = db.prepare(`
   DELETE FROM node_media
@@ -486,7 +448,7 @@ const listAccessibleProjects = db.prepare(`
   SELECT
     p.*,
     owner.username AS owner_username,
-    COUNT(CASE WHEN n.variant_of_id IS NULL THEN 1 END) AS node_count,
+    COUNT(n.id) AS node_count,
     CASE WHEN p.owner_user_id = @user_id THEN 1 ELSE 0 END AS is_owner
   FROM projects p
   LEFT JOIN nodes n ON n.project_id = p.id
@@ -506,7 +468,7 @@ const getAccessibleProjectRow = db.prepare(`
   SELECT
     p.*,
     owner.username AS owner_username,
-    COUNT(CASE WHEN n.variant_of_id IS NULL THEN 1 END) AS node_count,
+    COUNT(n.id) AS node_count,
     CASE WHEN p.owner_user_id = @user_id THEN 1 ELSE 0 END AS is_owner
   FROM projects p
   LEFT JOIN nodes n ON n.project_id = p.id
@@ -743,12 +705,6 @@ const getNode = db.prepare(`
   LEFT JOIN users owner ON owner.id = n.owner_user_id
   WHERE n.id = ?
 `)
-const getNodesByProject = db.prepare(`
-  SELECT n.*, owner.username AS owner_username
-  FROM nodes n
-  LEFT JOIN users owner ON owner.id = n.owner_user_id
-  WHERE n.project_id = ?
-`)
 const listNodeMediaByProjectStmt = db.prepare(`
   SELECT *
   FROM node_media
@@ -761,13 +717,12 @@ const hasChildNodeStmt = db.prepare(`
   WHERE parent_id = ?
   LIMIT 1
 `)
-const getNodeChildren = db.prepare(`SELECT id FROM nodes WHERE parent_id = ? OR variant_of_id = ?`)
+const getNodeChildren = db.prepare(`SELECT id FROM nodes WHERE parent_id = ?`)
 const listCollapsibleNodeIdsByProject = db.prepare(`
   SELECT DISTINCT parent.id
   FROM nodes child
   JOIN nodes parent ON child.parent_id = parent.id
   WHERE parent.project_id = ?
-    AND parent.variant_of_id IS NULL
 `)
 const updateProjectTimestamp = db.prepare(`
   UPDATE projects
@@ -825,7 +780,6 @@ const updateNodeStmt = db.prepare(`
 const updateNodeParentStmt = db.prepare(`
   UPDATE nodes
   SET parent_id = @parent_id,
-      variant_of_id = @variant_of_id,
       updated_at = @updated_at
   WHERE id = @id
 `)
@@ -841,18 +795,10 @@ function resequenceNodeMedia(nodeId) {
   }
 
   const mediaRows = listNodeMediaByNodeStmt.all(nodeId)
-  const primaryMediaId =
-    mediaRows.find((media) => Number(media.is_primary))?.id ||
-    mediaRows.find((media) => media.legacy_source_node_id === nodeId)?.id ||
-    mediaRows[0]?.id ||
-    null
-  let nextVariantSortOrder = 1
+  const primaryMediaId = mediaRows.find((media) => Number(media.is_primary))?.id || mediaRows[0]?.id || null
   for (const media of mediaRows) {
     const isPrimary = media.id === primaryMediaId ? 1 : 0
-    const sortOrder = isPrimary ? 0 : nextVariantSortOrder
-    if (!isPrimary) {
-      nextVariantSortOrder += 1
-    }
+    const sortOrder = media.id === primaryMediaId ? 0 : mediaRows.indexOf(media)
     if (
       media.node_id !== nodeId ||
       Number(media.is_primary || 0) !== isPrimary ||
@@ -861,60 +807,12 @@ function resequenceNodeMedia(nodeId) {
       updateNodeMediaPlacementStmt.run({
         id: media.id,
         node_id: nodeId,
-        legacy_source_node_id: media.legacy_source_node_id || null,
         is_primary: isPrimary,
         sort_order: sortOrder,
         updated_at: new Date().toISOString(),
       })
     }
   }
-}
-
-function syncLegacyNodeMedia(nodeId) {
-  // Temporary dual-write mirror while nodes still own legacy image/variant fields.
-  const node = getNode.get(nodeId)
-  const existing = getNodeMediaByLegacySourceStmt.get(nodeId)
-  const previousOwnerNodeId = existing?.node_id || null
-
-  if (!node || !nodeHasLegacyMedia(node)) {
-    if (existing) {
-      deleteNodeMediaByLegacySourceStmt.run(nodeId)
-      resequenceNodeMedia(previousOwnerNodeId)
-    }
-    return
-  }
-
-  const ownerNodeId = node.variant_of_id || node.id
-  const now = new Date().toISOString()
-  const shouldBePrimary =
-    node.variant_of_id == null
-      ? 1
-      : Number(existing?.is_primary || 0)
-  const payload = {
-    id: existing?.id || null,
-    project_id: node.project_id,
-    node_id: ownerNodeId,
-    legacy_source_node_id: node.id,
-    is_primary: shouldBePrimary,
-    sort_order: node.variant_of_id == null ? 0 : Number(existing?.sort_order || 0),
-    image_edits_json: JSON.stringify(normalizeNodeImageEdits(JSON.parse(node.image_edits_json || '{}'))),
-    image_path: node.image_path || null,
-    preview_path: node.preview_path || null,
-    original_filename: node.original_filename || null,
-    created_at: existing?.created_at || node.added_at || node.created_at || now,
-    updated_at: node.updated_at || now,
-  }
-  if (existing) {
-    updateNodeMediaMirrorStmt.run(payload)
-  } else {
-    payload.id = generateUniqueId((candidate) => Boolean(getNodeMediaByIdStmt.get(candidate)))
-    insertNodeMediaMirrorStmt.run(payload)
-  }
-
-  if (previousOwnerNodeId && previousOwnerNodeId !== ownerNodeId) {
-    resequenceNodeMedia(previousOwnerNodeId)
-  }
-  resequenceNodeMedia(ownerNodeId)
 }
 
 function assertNodeMedia(nodeId, mediaId) {
@@ -955,10 +853,6 @@ const createProjectWithRoot = db.transaction(({ name, description, owner_user_id
     review_status: 'new',
     needs_attention: 0,
     image_edits_json: JSON.stringify(defaultNodeImageEdits),
-    variant_of_id: null,
-    image_path: null,
-    preview_path: null,
-    original_filename: null,
     added_at: now,
     created_at: now,
     updated_at: now,
@@ -1042,9 +936,7 @@ const createNode = db.transaction((payload) => {
     review_status: normalizeNodeReviewStatus(payload.review_status),
     needs_attention: normalizeNodeReviewStatus(payload.review_status) === 'needs_attention' ? 1 : 0,
     image_edits_json: JSON.stringify(normalizeNodeImageEdits(payload.image_edits)),
-    variant_of_id: payload.variant_of_id ?? null,
   })
-  syncLegacyNodeMedia(nodeId)
 
   updateProjectTimestamp.run(now, payload.project_id)
   return nodeId
@@ -1063,7 +955,6 @@ const updateNode = db.transaction(({ id, project_id, name, notes, tags, review_s
     image_edits_json: JSON.stringify(normalizeNodeImageEdits(image_edits)),
     updated_at: now,
   })
-  syncLegacyNodeMedia(id)
   updateProjectTimestamp.run(now, project_id)
 })
 
@@ -1130,15 +1021,13 @@ const updateIdentificationTemplate = db.transaction(({ templateId, name, aiInstr
   updateProjectTimestamp.run(now, template.project_id)
 })
 
-const moveNode = db.transaction(({ id, project_id, parent_id, variant_of_id }) => {
+const moveNode = db.transaction(({ id, project_id, parent_id }) => {
   const now = new Date().toISOString()
   updateNodeParentStmt.run({
     id,
     parent_id,
-    variant_of_id,
     updated_at: now,
   })
-  syncLegacyNodeMedia(id)
   updateProjectTimestamp.run(now, project_id)
 })
 
@@ -1179,7 +1068,7 @@ const setNodeCollapsedStateRecursive = db.transaction(({ userId, nodeId, project
       continue
     }
 
-    const children = getNodeChildren.all(currentId, currentId)
+    const children = getNodeChildren.all(currentId)
     for (const child of children) {
       stack.push(child.id)
     }
@@ -1194,15 +1083,15 @@ const deleteNodeRecursive = db.transaction((nodeId, projectId) => {
     const current = stack.pop()
     if (!current.visited) {
       stack.push({ id: current.id, visited: true })
-      const children = getNodeChildren.all(current.id, current.id)
+    const children = getNodeChildren.all(current.id)
       for (const child of children) {
         stack.push({ id: child.id, visited: false })
       }
       continue
     }
 
-    const node = getNode.get(current.id)
-    for (const filePath of [node?.image_path, node?.preview_path]) {
+    const mediaRows = listNodeMediaByNodeStmt.all(current.id)
+    for (const filePath of mediaRows.flatMap((media) => [media.image_path, media.preview_path])) {
       if (!filePath) {
         continue
       }
@@ -1216,7 +1105,9 @@ const deleteNodeRecursive = db.transaction((nodeId, projectId) => {
     deleteNodeCollapsePrefsByNodeStmt.run(current.id)
     deleteNodeIdentificationFieldValuesByNodeStmt.run(current.id)
     deleteNodeIdentificationStmt.run(current.id)
-    deleteNodeMediaByLegacySourceStmt.run(current.id)
+    for (const mediaRow of mediaRows) {
+      deleteNodeMediaByIdStmt.run(mediaRow.id)
+    }
     deleteNodeStmt.run(current.id)
   }
 
@@ -1232,18 +1123,6 @@ const updateNodeMediaEdits = db.transaction(({ nodeId, mediaId, imageEdits, proj
     image_edits_json: imageEditsJson,
     updated_at: now,
   })
-  if (media.legacy_source_node_id) {
-    updateNodeStmt.run({
-      id: media.legacy_source_node_id,
-      name: assertNode(media.legacy_source_node_id).name,
-      notes: assertNode(media.legacy_source_node_id).notes || '',
-      tags_json: assertNode(media.legacy_source_node_id).tags_json || '[]',
-      review_status: normalizeNodeReviewStatus(assertNode(media.legacy_source_node_id).review_status),
-      needs_attention: normalizeNodeReviewStatus(assertNode(media.legacy_source_node_id).review_status) === 'needs_attention' ? 1 : 0,
-      image_edits_json: imageEditsJson,
-      updated_at: now,
-    })
-  }
   updateProjectTimestamp.run(now, projectId)
 })
 
@@ -1252,11 +1131,10 @@ const addNodeMedia = db.transaction(({ nodeId, projectId, imagePath, previewPath
   const now = new Date().toISOString()
   const existingMedia = listNodeMediaByNodeStmt.all(nodeId)
   const mediaId = generateUniqueId((candidate) => Boolean(getNodeMediaByIdStmt.get(candidate)))
-  insertNodeMediaMirrorStmt.run({
+  insertNodeMediaStmt.run({
     id: mediaId,
     project_id: projectId,
     node_id: nodeId,
-    legacy_source_node_id: null,
     is_primary: existingMedia.length ? 0 : 1,
     sort_order: existingMedia.length ? existingMedia.length : 0,
     image_edits_json: JSON.stringify(normalizeNodeImageEdits(imageEdits)),
@@ -1281,7 +1159,6 @@ const setPrimaryNodeMedia = db.transaction(({ nodeId, mediaId, projectId }) => {
   updateNodeMediaPlacementStmt.run({
     id: mediaId,
     node_id: nodeId,
-    legacy_source_node_id: null,
     is_primary: 1,
     sort_order: 0,
     updated_at: now,
@@ -1292,12 +1169,6 @@ const setPrimaryNodeMedia = db.transaction(({ nodeId, mediaId, projectId }) => {
 
 const removeNodeMedia = db.transaction(({ nodeId, mediaId, projectId }) => {
   const media = assertNodeMedia(nodeId, mediaId)
-  const now = new Date().toISOString()
-  const sourceNodeId = media.legacy_source_node_id || null
-  if (sourceNodeId && sourceNodeId !== nodeId) {
-    deleteNodeRecursive(sourceNodeId, projectId)
-    return
-  }
 
   for (const filePath of [media.image_path, media.preview_path]) {
     if (!filePath) {
@@ -1309,16 +1180,9 @@ const removeNodeMedia = db.transaction(({ nodeId, mediaId, projectId }) => {
     }
   }
 
-  if (sourceNodeId === nodeId) {
-    clearNodeLegacyImageFieldsStmt.run({
-      id: nodeId,
-      image_edits_json: JSON.stringify(defaultNodeImageEdits),
-      updated_at: now,
-    })
-  }
   deleteNodeMediaByIdStmt.run(media.id)
   resequenceNodeMedia(nodeId)
-  updateProjectTimestamp.run(now, projectId)
+  updateProjectTimestamp.run(new Date().toISOString(), projectId)
 })
 
 const mergeNodeIntoTargetMedia = db.transaction(({ sourceNodeId, targetNodeId, projectId }) => {
@@ -1345,11 +1209,10 @@ const mergeNodeIntoTargetMedia = db.transaction(({ sourceNodeId, targetNodeId, p
 
   const copiedMedia = cloneMediaPayloadToProject(projectId, preservedMedia, 'merge')
   const now = new Date().toISOString()
-  insertNodeMediaMirrorStmt.run({
+  insertNodeMediaStmt.run({
     id: generateUniqueId((candidate) => Boolean(getNodeMediaByIdStmt.get(candidate))),
     project_id: projectId,
     node_id: targetNode.id,
-    legacy_source_node_id: null,
     is_primary: 0,
     sort_order: listNodeMediaByNodeStmt.all(targetNode.id).length + 1,
     image_edits_json: JSON.stringify(copiedMedia.image_edits),
@@ -1364,7 +1227,7 @@ const mergeNodeIntoTargetMedia = db.transaction(({ sourceNodeId, targetNodeId, p
   updateProjectTimestamp.run(now, projectId)
 })
 
-const extractNodeMediaToSibling = db.transaction(({ nodeId, mediaId, projectId, ownerUserId }) => {
+const extractNodeMediaToChild = db.transaction(({ nodeId, mediaId, projectId, ownerUserId }) => {
   const sourceNode = assertNode(nodeId)
   ensureNodeBelongsToProject(sourceNode, projectId)
   ensureCanHaveChildren(sourceNode)
@@ -1381,16 +1244,20 @@ const extractNodeMediaToSibling = db.transaction(({ nodeId, mediaId, projectId, 
     project_id: projectId,
     owner_user_id: ownerUserId || sourceNode.owner_user_id || null,
     parent_id: sourceNode.id,
-    variant_of_id: null,
     type: 'photo',
     name: createUntitledName(),
     notes: '',
     tags: [],
     review_status: 'new',
-    image_edits: copiedMedia.image_edits,
-    image_path: copiedMedia.image_path,
-    preview_path: copiedMedia.preview_path,
-    original_filename: copiedMedia.original_filename,
+    image_edits: defaultNodeImageEdits,
+  })
+  addNodeMedia({
+    nodeId: newNodeId,
+    projectId,
+    imagePath: copiedMedia.image_path,
+    previewPath: copiedMedia.preview_path,
+    originalFilename: copiedMedia.original_filename,
+    imageEdits: copiedMedia.image_edits,
   })
 
   removeNodeMedia({
@@ -1404,10 +1271,8 @@ const extractNodeMediaToSibling = db.transaction(({ nodeId, mediaId, projectId, 
 
 const deleteProjectRecursive = db.transaction((projectId) => {
   assertProject(projectId)
-  const rows = getNodesByProject.all(projectId)
-
-  for (const node of rows) {
-    for (const filePath of [node.image_path, node.preview_path]) {
+  for (const mediaRow of listNodeMediaByProjectStmt.all(projectId)) {
+    for (const filePath of [mediaRow.image_path, mediaRow.preview_path]) {
       if (!filePath) {
         continue
       }
@@ -1437,10 +1302,8 @@ const deleteProjectRecursive = db.transaction((projectId) => {
 
 const clearProjectContents = db.transaction((projectId) => {
   assertProject(projectId)
-  const rows = getNodesByProject.all(projectId)
-
-  for (const node of rows) {
-    for (const filePath of [node.image_path, node.preview_path]) {
+  for (const mediaRow of listNodeMediaByProjectStmt.all(projectId)) {
+    for (const filePath of [mediaRow.image_path, mediaRow.preview_path]) {
       if (!filePath) {
         continue
       }
@@ -1810,7 +1673,6 @@ function buildNodePathNames(nodesById, nodeId) {
 function collectScopedNodeEntries(projectNodes, selectedNodeId, parentDepth, childDepth) {
   const nodesById = new Map(projectNodes.map((node) => [node.id, node]))
   const childrenByParent = new Map()
-  const variantsByAnchor = new Map()
 
   for (const node of projectNodes) {
     if (node.parent_id) {
@@ -1818,12 +1680,6 @@ function collectScopedNodeEntries(projectNodes, selectedNodeId, parentDepth, chi
         childrenByParent.set(node.parent_id, [])
       }
       childrenByParent.get(node.parent_id).push(node)
-    }
-    if (node.variant_of_id) {
-      if (!variantsByAnchor.has(node.variant_of_id)) {
-        variantsByAnchor.set(node.variant_of_id, [])
-      }
-      variantsByAnchor.get(node.variant_of_id).push(node)
     }
   }
 
@@ -1867,11 +1723,7 @@ function collectScopedNodeEntries(projectNodes, selectedNodeId, parentDepth, chi
   }
 
   for (const [nodeId, relation] of baseRelations.entries()) {
-    const node = nodesById.get(nodeId)
-    pushScopedNode(node, relation)
-    for (const variant of variantsByAnchor.get(nodeId) || []) {
-      pushScopedNode(variant, `${relation} variant`)
-    }
+    pushScopedNode(nodesById.get(nodeId), relation)
   }
 
   return scopedEntries
@@ -1910,6 +1762,12 @@ async function runOpenAiIdentification({ node, projectNodes, identification, ide
   }
 
   const nodesById = new Map(projectNodes.map((projectNode) => [projectNode.id, projectNode]))
+  const mediaRowsByNodeId = new Map()
+  for (const mediaRow of listNodeMediaByProjectStmt.all(node.project_id)) {
+    const items = mediaRowsByNodeId.get(mediaRow.node_id) || []
+    items.push(mediaRow)
+    mediaRowsByNodeId.set(mediaRow.node_id, items)
+  }
   const fieldScopes = new Map()
   const scopedNodesById = new Map()
   const imageEntries = []
@@ -1930,7 +1788,11 @@ async function runOpenAiIdentification({ node, projectNodes, identification, ide
       if (!scopedNode) {
         continue
       }
-      const imagePath = scopedNode.image_path || scopedNode.preview_path
+      const primaryMedia =
+        (mediaRowsByNodeId.get(scopedNode.id) || []).find((item) => Number(item.is_primary)) ||
+        (mediaRowsByNodeId.get(scopedNode.id) || [])[0] ||
+        null
+      const imagePath = primaryMedia?.preview_path || primaryMedia?.image_path || null
       if (!imagePath) {
         continue
       }
@@ -1964,7 +1826,6 @@ async function runOpenAiIdentification({ node, projectNodes, identification, ide
       name: scopedNode.name,
       type: scopedNode.type,
       notes: scopedNode.notes || '',
-      hasImage: Boolean(scopedNode.image_path || scopedNode.preview_path),
       identification: scopedIdentification
         ? {
             templateName: scopedIdentification.templateName,
@@ -1978,6 +1839,7 @@ async function runOpenAiIdentification({ node, projectNodes, identification, ide
             })),
           }
         : null,
+      hasImage: Boolean((mediaRowsByNodeId.get(scopedNode.id) || []).length),
     }
   })
 
@@ -2253,7 +2115,6 @@ function serializeNodeMedia(row) {
   return {
     id: row.id,
     nodeId: row.node_id,
-    legacySourceNodeId: row.legacy_source_node_id || null,
     isPrimary: Boolean(row.is_primary),
     sortOrder: Number(row.sort_order || 0),
     originalFilename: row.original_filename || null,
@@ -2273,24 +2134,21 @@ function serializeNode(row, _collapsedMap = null, identification = null, mediaRo
     ownerUserId: row.owner_user_id || null,
     ownerUsername: row.owner_username || null,
     parent_id: row.parent_id,
-    variant_of_id: row.variant_of_id,
     type: row.type,
     name: row.name,
     notes: row.notes,
-    original_filename: row.original_filename,
     added_at: row.added_at || row.created_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
     tags: JSON.parse(row.tags_json || '[]'),
     reviewStatus: normalizeNodeReviewStatus(row.review_status || (row.needs_attention ? 'needs_attention' : 'new')),
     needsAttention: normalizeNodeReviewStatus(row.review_status || (row.needs_attention ? 'needs_attention' : 'new')) === 'needs_attention',
-    imageEdits: normalizeNodeImageEdits(JSON.parse(row.image_edits_json || '{}')),
+    imageEdits: primaryMedia?.imageEdits || normalizeNodeImageEdits(JSON.parse(row.image_edits_json || '{}')),
     collapsed: false,
-    isVariant: row.variant_of_id != null,
     identification,
-    hasImage: Boolean(primaryMedia?.imageUrl || row.image_path),
-    imageUrl: primaryMedia?.imageUrl || buildVersionedUploadUrl(row.image_path, row.updated_at || row.created_at || ''),
-    previewUrl: primaryMedia?.previewUrl || buildVersionedUploadUrl(row.preview_path, row.updated_at || row.created_at || ''),
+    hasImage: Boolean(primaryMedia?.imageUrl),
+    imageUrl: primaryMedia?.imageUrl || null,
+    previewUrl: primaryMedia?.previewUrl || null,
     primaryMediaId: primaryMedia?.id || null,
     mediaCount: media.length,
     media,
@@ -2327,7 +2185,7 @@ function serializeNodeForUser(row, userId) {
     buildNodeIdentification(row.id, templateRowsById, identificationRowsByNodeId, fieldRowsByNodeId),
     mediaRowsByNodeId.get(row.id) || [],
   )
-  if (row.variant_of_id != null || !hasChildNodeStmt.get(row.id)) {
+  if (!hasChildNodeStmt.get(row.id)) {
     return node
   }
   const preference = userId ? getUserNodeCollapsePreference.get(userId, row.id) : null
@@ -2336,7 +2194,6 @@ function serializeNodeForUser(row, userId) {
 }
 
 function buildTree(project, rows, userId = null) {
-  const visibleRows = rows.filter((row) => row.variant_of_id == null)
   const templateRowsById = new Map(
     listIdentificationTemplatesByProject.all(project.id)
       .map(serializeIdentificationTemplate)
@@ -2364,7 +2221,7 @@ function buildTree(project, rows, userId = null) {
           .map((row) => [row.node_id, Boolean(row.collapsed)]),
       )
     : null
-  const nodes = visibleRows.map((row) =>
+  const nodes = rows.map((row) =>
     serializeNode(
       row,
       collapsedMap,
@@ -2506,36 +2363,22 @@ function ensureNodeBelongsToProject(node, projectId) {
 }
 
 function ensureNotRoot(node) {
-  if (node.parent_id == null && node.variant_of_id == null) {
+  if (node.parent_id == null) {
     const error = new Error('The project root cannot be deleted or moved')
     error.status = 400
     throw error
   }
 }
 
-function ensureCanHaveChildren(node) {
-  if (node.variant_of_id != null) {
-    const error = new Error('Variants cannot have children')
-    error.status = 400
-    throw error
-  }
-}
+function ensureCanHaveChildren(_node) {}
 
 function ensureNoChildren(node) {
-  const children = getNodeChildren.all(node.id, node.id)
+  const children = getNodeChildren.all(node.id)
   if (children.length > 0) {
-    const error = new Error('Only leaf nodes can become variants')
+    const error = new Error('Only leaf nodes can be converted into a photo on their parent')
     error.status = 400
     throw error
   }
-}
-
-function resolveVariantAnchor(node) {
-  if (node.variant_of_id == null) {
-    return node
-  }
-
-  return assertNode(node.variant_of_id)
 }
 
 function ensureNoCycle(nodeId, parentId) {
@@ -2667,8 +2510,7 @@ function ensureUniquePath(targetPath, suffix = '') {
 function exportProjectMediaArchive(projectId) {
   const project = assertProject(projectId)
   const rows = getProjectNodes.all(projectId)
-  const tree = buildTree(project, rows.filter((row) => row.variant_of_id == null))
-  const rowById = new Map(rows.map((row) => [row.id, row]))
+  const tree = buildTree(project, rows)
   const workDir = makeTempDir(`export-media-${projectId}`)
   const rootDir = path.join(workDir, sanitizeFilesystemName(project.name || `project-${projectId}`))
   fs.mkdirSync(rootDir, { recursive: true })
@@ -2723,7 +2565,7 @@ function exportProjectMediaArchive(projectId) {
   }
 
   function exportNode(node, destinationDir) {
-    const safeNodeName = sanitizeFilesystemName(node.name || rowById.get(node.id)?.type || 'node')
+    const safeNodeName = sanitizeFilesystemName(node.name || node.type || 'node')
     const hasChildren = (node.children?.length || 0) > 0
     const mediaCount = node.media?.length || 0
 
@@ -2812,14 +2654,12 @@ function copyProjectFileIntoArchive(workDir, sourceRelativePath, outputRelativeP
 }
 
 function writeProjectManifest(project, rows, workDir) {
-  const filesDir = path.join(workDir, 'files')
-  fs.mkdirSync(filesDir, { recursive: true })
+  fs.mkdirSync(path.join(workDir, 'files'), { recursive: true })
   const { templateRows, identificationsByNodeId, fieldValuesByNodeId, mediaRowsByNodeId } =
     buildProjectArchiveData(project.id)
-  const rowsById = new Map(rows.map((row) => [row.id, row]))
 
   const manifest = {
-    version: 3,
+    version: 4,
     exported_at: new Date().toISOString(),
     project: {
       name: project.name,
@@ -2827,9 +2667,7 @@ function writeProjectManifest(project, rows, workDir) {
       settings: normalizeProjectSettings(JSON.parse(project.settings_json || '{}')),
       identification_templates: templateRows,
     },
-    nodes: rows
-      .filter((row) => row.variant_of_id == null)
-      .map((row) => ({
+    nodes: rows.map((row) => ({
         id: row.id,
         owner_user_id: row.owner_user_id || null,
         parent_id: row.parent_id,
@@ -2858,10 +2696,6 @@ function writeProjectManifest(project, rows, workDir) {
               path.extname(mediaRow.preview_path || '') || '.jpg'
             }`,
           )
-          const legacyNode =
-            mediaRow.legacy_source_node_id && mediaRow.legacy_source_node_id !== row.id
-              ? rowsById.get(mediaRow.legacy_source_node_id)
-              : null
 
           return {
             id: mediaRow.id,
@@ -2873,26 +2707,6 @@ function writeProjectManifest(project, rows, workDir) {
             updated_at: mediaRow.updated_at,
             image_file: imageFile,
             preview_file: previewFile,
-            legacy_node: legacyNode
-              ? {
-                  id: legacyNode.id,
-                  owner_user_id: legacyNode.owner_user_id || null,
-                  name: legacyNode.name,
-                  notes: legacyNode.notes || '',
-                  tags: JSON.parse(legacyNode.tags_json || '[]'),
-                  review_status: normalizeNodeReviewStatus(
-                    legacyNode.review_status || (legacyNode.needs_attention ? 'needs_attention' : 'new'),
-                  ),
-                  added_at: legacyNode.added_at || legacyNode.created_at,
-                  created_at: legacyNode.created_at,
-                  updated_at: legacyNode.updated_at,
-                  identification: serializeArchiveIdentification(
-                    legacyNode.id,
-                    identificationsByNodeId,
-                    fieldValuesByNodeId,
-                  ),
-                }
-              : null,
           }
         }),
       })),
@@ -2934,11 +2748,9 @@ function copyImportedArchiveFile(extractDir, projectId, relativeFilePath) {
 function restoreNodeMediaFromArchive({
   projectId,
   nodeId,
-  ownerUserId = null,
   extractDir = null,
   uploadedFileMap = null,
   mediaEntries = [],
-  templateIdMap = new Map(),
 }) {
   for (const entry of sortArchiveMediaEntries(mediaEntries)) {
     const imagePath = extractDir
@@ -2978,39 +2790,6 @@ function restoreNodeMediaFromArchive({
           })()
         : null
 
-    const legacyNode = entry.legacy_node || null
-    if (legacyNode && !entry.is_primary) {
-      const variantNodeId = createNode({
-        project_id: projectId,
-        owner_user_id: legacyNode.owner_user_id || ownerUserId || null,
-        parent_id: null,
-        variant_of_id: nodeId,
-        type: 'photo',
-        name: legacyNode.name || createUntitledName(projectId),
-        notes: legacyNode.notes || '',
-        tags: Array.isArray(legacyNode.tags) ? legacyNode.tags : [],
-        review_status: legacyNode.review_status || 'new',
-        image_edits: entry.image_edits,
-        image_path: imagePath,
-        preview_path: previewPath,
-        original_filename: entry.original_filename || null,
-        added_at: legacyNode.added_at || legacyNode.created_at || new Date().toISOString(),
-      })
-
-      if (legacyNode.identification?.template_id) {
-        const mappedTemplateId = templateIdMap.get(String(legacyNode.identification.template_id))
-        if (mappedTemplateId) {
-          upsertNodeIdentificationData({
-            nodeId: variantNodeId,
-            templateId: mappedTemplateId,
-            createdByUserId: legacyNode.identification.created_by_user_id || null,
-            fields: Array.isArray(legacyNode.identification.fields) ? legacyNode.identification.fields : [],
-          })
-        }
-      }
-      continue
-    }
-
     addNodeMedia({
       nodeId,
       projectId,
@@ -3036,15 +2815,15 @@ function restoreProjectFromArchive(projectId, archivePath) {
 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
     const importedRows = Array.isArray(manifest.nodes) ? manifest.nodes : []
-    const mediaFirstArchive =
-      Number(manifest.version || 0) >= 3 || importedRows.some((node) => Array.isArray(node.media))
+    const mediaFirstArchive = importedRows.every((node) => Array.isArray(node.media))
+    if (!mediaFirstArchive) {
+      const error = new Error('Legacy project archives are no longer supported')
+      error.status = 400
+      throw error
+    }
     const rootRow = mediaFirstArchive
       ? importedRows.find((node) => (node.parent_id ?? node.parent_old_id) == null)
-      : importedRows.find(
-          (node) =>
-            (node.parent_id ?? node.parent_old_id) == null &&
-            (node.variant_of_id ?? node.variant_of_old_id) == null,
-        )
+      : null
     if (!rootRow) {
       const error = new Error('Invalid project archive: root node missing')
       error.status = 400
@@ -3097,7 +2876,6 @@ function restoreProjectFromArchive(projectId, archivePath) {
           ? rootRow.owner_user_id
           : assertProject(projectId).owner_user_id || null,
       parent_id: null,
-      variant_of_id: null,
       type: Array.isArray(rootRow.media) && rootRow.media.length ? 'photo' : 'folder',
       name: rootRow.name || 'Root',
       notes: rootRow.notes || '',
@@ -3112,9 +2890,6 @@ function restoreProjectFromArchive(projectId, archivePath) {
           ? 1
           : 0,
       image_edits_json: JSON.stringify(normalizeNodeImageEdits(rootRow.image_edits || {})),
-      image_path: null,
-      preview_path: null,
-      original_filename: null,
       added_at: rootRow.added_at || now,
       created_at: now,
       updated_at: now,
@@ -3126,10 +2901,8 @@ function restoreProjectFromArchive(projectId, archivePath) {
       restoreNodeMediaFromArchive({
         projectId,
         nodeId: rootId,
-        ownerUserId: rootRow.owner_user_id || assertProject(projectId).owner_user_id || null,
         extractDir,
         mediaEntries: rootRow.media,
-        templateIdMap,
       })
     }
     if (rootRow.identification?.template_id) {
@@ -3152,30 +2925,15 @@ function restoreProjectFromArchive(projectId, archivePath) {
         const row = pendingRows[index]
         const rowId = String(row.id ?? row.old_id)
         const parentRef = row.parent_id ?? row.parent_old_id ?? null
-        const variantRef = mediaFirstArchive ? null : row.variant_of_id ?? row.variant_of_old_id ?? null
         const parentId = parentRef != null ? oldToNew.get(String(parentRef)) : null
-        const variantOfId = variantRef != null ? oldToNew.get(String(variantRef)) : null
-        if (
-          (parentRef != null && !parentId) ||
-          (variantRef != null && !variantOfId)
-        ) {
+        if (parentRef != null && !parentId) {
           continue
         }
-
-        const relativeImagePath =
-          !mediaFirstArchive && row.image_file
-            ? copyImportedArchiveFile(extractDir, projectId, row.image_file)
-            : null
-        const relativePreviewPath =
-          !mediaFirstArchive && row.preview_file
-            ? copyImportedArchiveFile(extractDir, projectId, row.preview_file)
-            : null
 
         const nodeId = createNode({
           project_id: projectId,
           owner_user_id: row.owner_user_id || assertProject(projectId).owner_user_id || null,
           parent_id: parentId,
-          variant_of_id: variantOfId,
           type:
             row.type === 'photo' || (Array.isArray(row.media) && row.media.length)
               ? 'photo'
@@ -3189,9 +2947,6 @@ function restoreProjectFromArchive(projectId, archivePath) {
           tags: Array.isArray(row.tags) ? row.tags : [],
           review_status: row.review_status || (row.needs_attention ? 'needs_attention' : 'new'),
           image_edits: row.image_edits,
-          image_path: relativeImagePath,
-          preview_path: relativePreviewPath,
-          original_filename: row.original_filename || null,
           added_at: row.added_at || row.created_at || now,
         })
 
@@ -3199,10 +2954,8 @@ function restoreProjectFromArchive(projectId, archivePath) {
           restoreNodeMediaFromArchive({
             projectId,
             nodeId,
-            ownerUserId: row.owner_user_id || assertProject(projectId).owner_user_id || null,
             extractDir,
             mediaEntries: row.media,
-            templateIdMap,
           })
         }
 
@@ -3242,8 +2995,12 @@ function restoreSubtreeFromPayload(projectId, manifest, uploadedFiles) {
 
   const rows = Array.isArray(manifest?.nodes) ? manifest.nodes : []
   const manifestRootId = String(manifest.root_id)
-  const mediaFirstPayload =
-    Number(manifest?.version || 0) >= 2 || rows.some((row) => Array.isArray(row.media))
+  const mediaFirstPayload = rows.every((row) => Array.isArray(row.media))
+  if (!mediaFirstPayload) {
+    const error = new Error('Legacy subtree payloads are no longer supported')
+    error.status = 400
+    throw error
+  }
   const rootRow = rows.find((row) => String(row.id ?? row.old_id) === manifestRootId)
   if (!rootRow) {
     const error = new Error('Invalid subtree payload: root node missing')
@@ -3267,57 +3024,15 @@ function restoreSubtreeFromPayload(projectId, manifest, uploadedFiles) {
         : row.parent_id != null || row.parent_old_id != null
           ? oldToNew.get(String(row.parent_id ?? row.parent_old_id))
           : null
-      const variantOfId =
-        !mediaFirstPayload && isRoot
-          ? manifest.root_variant_of_id
-          : !mediaFirstPayload &&
-              (row.variant_of_id != null || row.variant_of_old_id != null)
-            ? oldToNew.get(String(row.variant_of_id ?? row.variant_of_old_id))
-            : null
 
       if (!isRoot && (row.parent_id != null || row.parent_old_id != null) && !parentId) {
         continue
-      }
-      if (
-        !mediaFirstPayload &&
-        !isRoot &&
-        (row.variant_of_id != null || row.variant_of_old_id != null) &&
-        !variantOfId
-      ) {
-        continue
-      }
-
-      const imageFile = !mediaFirstPayload && row.image_file_key ? fileMap.get(row.image_file_key) : null
-      const previewFile =
-        !mediaFirstPayload && row.preview_file_key ? fileMap.get(row.preview_file_key) : null
-      const uniqueToken = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      const safeImageName = imageFile ? sanitizeUploadName(imageFile.originalname, 'image.jpg') : null
-      const safePreviewName = previewFile ? sanitizeUploadName(previewFile.originalname, 'preview.jpg') : null
-      const relativeImagePath = imageFile
-        ? path.join(String(projectId), `${uniqueToken}-${safeImageName}`)
-        : null
-      const relativePreviewPath = previewFile
-        ? path.join(String(projectId), `${uniqueToken}-${safePreviewName}`)
-        : null
-
-      const imageFileData = readUploadedFileData(imageFile)
-      if (imageFileData) {
-        const absoluteImagePath = path.join(uploadsDir, relativeImagePath)
-        fs.mkdirSync(path.dirname(absoluteImagePath), { recursive: true })
-        fs.writeFileSync(absoluteImagePath, imageFileData)
-      }
-      const previewFileData = readUploadedFileData(previewFile)
-      if (previewFileData) {
-        const absolutePreviewPath = path.join(uploadsDir, relativePreviewPath)
-        fs.mkdirSync(path.dirname(absolutePreviewPath), { recursive: true })
-        fs.writeFileSync(absolutePreviewPath, previewFileData)
       }
 
       const nodeId = createNode({
         project_id: projectId,
         owner_user_id: row.owner_user_id || assertProject(projectId).owner_user_id || null,
         parent_id: parentId,
-        variant_of_id: variantOfId,
         type:
           row.type === 'photo' || (Array.isArray(row.media) && row.media.length)
             ? 'photo'
@@ -3331,9 +3046,6 @@ function restoreSubtreeFromPayload(projectId, manifest, uploadedFiles) {
         tags: Array.isArray(row.tags) ? row.tags : [],
         review_status: row.review_status || (row.needs_attention ? 'needs_attention' : 'new'),
         image_edits: row.image_edits,
-        image_path: relativeImagePath,
-        preview_path: relativePreviewPath,
-        original_filename: row.original_filename || null,
         added_at: row.added_at || row.created_at || new Date().toISOString(),
       })
 
@@ -3341,7 +3053,6 @@ function restoreSubtreeFromPayload(projectId, manifest, uploadedFiles) {
         restoreNodeMediaFromArchive({
           projectId,
           nodeId,
-          ownerUserId: row.owner_user_id || assertProject(projectId).owner_user_id || null,
           uploadedFileMap: fileMap,
           mediaEntries: row.media,
         })
@@ -3390,8 +3101,12 @@ function importProjectArchive(archivePath, projectNameOverride = '', ownerUserId
 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
     const importedRows = Array.isArray(manifest.nodes) ? manifest.nodes : []
-    const mediaFirstArchive =
-      Number(manifest.version || 0) >= 3 || importedRows.some((node) => Array.isArray(node.media))
+    const mediaFirstArchive = importedRows.every((node) => Array.isArray(node.media))
+    if (!mediaFirstArchive) {
+      const error = new Error('Legacy project archives are no longer supported')
+      error.status = 400
+      throw error
+    }
     projectId = createProjectWithRoot({
       name:
         String(projectNameOverride || manifest.project?.name || 'Imported Project').trim() ||
@@ -3433,13 +3148,7 @@ function importProjectArchive(archivePath, projectNameOverride = '', ownerUserId
 
     const oldToNew = new Map()
     const createdRoot = getProjectNodes.all(projectId).find((node) => node.parent_id == null)
-    const rootRow = mediaFirstArchive
-      ? importedRows.find((node) => (node.parent_id ?? node.parent_old_id) == null)
-      : importedRows.find(
-          (node) =>
-            (node.parent_id ?? node.parent_old_id) == null &&
-            (node.variant_of_id ?? node.variant_of_old_id) == null,
-        )
+    const rootRow = importedRows.find((node) => (node.parent_id ?? node.parent_old_id) == null)
 
     if (!createdRoot || !rootRow) {
       const error = new Error('Invalid project archive: root node missing')
@@ -3462,10 +3171,8 @@ function importProjectArchive(archivePath, projectNameOverride = '', ownerUserId
       restoreNodeMediaFromArchive({
         projectId,
         nodeId: createdRoot.id,
-        ownerUserId: rootRow.owner_user_id || ownerUserId || null,
         extractDir,
         mediaEntries: rootRow.media,
-        templateIdMap,
       })
     }
     if (rootRow.identification?.template_id) {
@@ -3493,33 +3200,14 @@ function importProjectArchive(archivePath, projectNameOverride = '', ownerUserId
           row.parent_id != null || row.parent_old_id != null
             ? oldToNew.get(String(row.parent_id ?? row.parent_old_id))
             : null
-        const variantOfId =
-          !mediaFirstArchive && (row.variant_of_id != null || row.variant_of_old_id != null)
-            ? oldToNew.get(String(row.variant_of_id ?? row.variant_of_old_id))
-            : null
-        if (
-          ((row.parent_id != null || row.parent_old_id != null) && !parentId) ||
-          (!mediaFirstArchive &&
-            (row.variant_of_id != null || row.variant_of_old_id != null) &&
-            !variantOfId)
-        ) {
+        if ((row.parent_id != null || row.parent_old_id != null) && !parentId) {
           continue
         }
-
-        const relativeImagePath =
-          !mediaFirstArchive && row.image_file
-            ? copyImportedArchiveFile(extractDir, projectId, row.image_file)
-            : null
-        const relativePreviewPath =
-          !mediaFirstArchive && row.preview_file
-            ? copyImportedArchiveFile(extractDir, projectId, row.preview_file)
-            : null
 
         const nodeId = createNode({
           project_id: projectId,
           owner_user_id: row.owner_user_id || ownerUserId || null,
           parent_id: parentId,
-          variant_of_id: variantOfId,
           type:
             row.type === 'photo' || (Array.isArray(row.media) && row.media.length)
               ? 'photo'
@@ -3533,19 +3221,14 @@ function importProjectArchive(archivePath, projectNameOverride = '', ownerUserId
           tags: Array.isArray(row.tags) ? row.tags : [],
           review_status: row.review_status || (row.needs_attention ? 'needs_attention' : 'new'),
           image_edits: row.image_edits,
-          image_path: relativeImagePath,
-          preview_path: relativePreviewPath,
-          original_filename: row.original_filename || null,
         })
 
         if (Array.isArray(row.media)) {
           restoreNodeMediaFromArchive({
             projectId,
             nodeId,
-            ownerUserId: row.owner_user_id || ownerUserId || null,
             extractDir,
             mediaEntries: row.media,
-            templateIdMap,
           })
         }
 
@@ -3719,7 +3402,7 @@ const serverContext = {
   ensureNoCycle,
   ensureNodeBelongsToProject,
   ensureNotRoot,
-  extractNodeMediaToSibling,
+  extractNodeMediaToChild,
   exportProjectArchive,
   exportProjectMediaArchive,
   fs,
@@ -3770,7 +3453,6 @@ const serverContext = {
   renameProjectAndRoot,
   requireAuth,
   removeNodeMedia,
-  resolveVariantAnchor,
   restoreProjectFromArchive,
   restoreSubtreeFromPayload,
   restoreUpload,
