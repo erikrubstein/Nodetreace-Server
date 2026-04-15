@@ -2,7 +2,7 @@
 
 Standalone backend for Nodetrace.
 
-Shared architecture notes live in [../architecture.md](../architecture.md).
+Shared top-level context lives in [../CONTEXT.md](../CONTEXT.md).
 
 ## Responsibilities
 
