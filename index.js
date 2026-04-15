@@ -855,6 +855,8 @@ const renameProjectAndRoot = db.transaction(({ id, name }) => {
       name,
       notes: rootNode.notes || '',
       tags_json: rootNode.tags_json || '[]',
+      review_status: rootNode.review_status || 'new',
+      needs_attention: rootNode.review_status === 'needs_attention' ? 1 : Number(rootNode.needs_attention || 0),
       image_edits_json: rootNode.image_edits_json || JSON.stringify(defaultNodeImageEdits),
       updated_at: now,
     })
