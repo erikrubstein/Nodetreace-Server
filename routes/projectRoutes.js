@@ -144,7 +144,6 @@ export function registerProjectRoutes(app, ctx) {
         updated_at: new Date().toISOString(),
       })
 
-      broadcastProjectEvent(projectId)
       res.json(serializeProject(assertProjectAccess(projectId, req.user.id), req.user.id))
     } catch (error) {
       next(error)
