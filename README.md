@@ -2,7 +2,7 @@
 
 Standalone backend for Nodetrace.
 
-Shared top-level context lives in [../CONTEXT.md](../CONTEXT.md).
+Shared top-level agent guidance lives in [../AGENTS.md](../AGENTS.md).
 
 ## Responsibilities
 

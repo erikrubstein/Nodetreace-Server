@@ -15,3 +15,4 @@
 - Validation and response shaping can live here.
 - Reusable or multi-step domain logic belongs in `server/`.
 - Route files should depend on injected helpers rather than import unrelated modules directly.
+- `projectRoutes.js` owns the per-user project preferences endpoint; project UI writes there should stay per-user and should not trigger project-wide reload events.
