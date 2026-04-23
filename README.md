@@ -45,7 +45,7 @@ NODETRACE_SECRET_KEY=replace-this-with-a-long-random-secret
 3. Start the server:
 
 ```bash
-npm run dev
+npm start
 ```
 
 The server listens on `http://127.0.0.1:3001` by default.
@@ -95,13 +95,23 @@ You can either:
 - copy the built client bundle into `./dist`, or
 - point `NODETRACE_WEB_DIST` at another built bundle location
 
-To produce a bundle from the client repo:
+To produce a drop-in web bundle from the client repo:
 
 ```bash
 cd ../Nodetrace-Client
 npm install
-npm run build:web
+npm run bundle:web
 ```
+
+That command writes a release zip under the client repo:
+
+- `release/web/Nodetrace-Web-<version>.zip`
+
+Extract that archive into the server repo root so it creates or replaces:
+
+- `./dist`
+
+After that, `npm start` will serve the browser UI from the server.
 
 ## Development Scripts
 
@@ -111,6 +121,22 @@ npm run build:web
   Starts the server without watch mode.
 - `npm run lint`
   Lints all server-side JavaScript files.
+
+## Running A Release Deployment
+
+For a normal deployed server:
+
+1. Clone this repo.
+2. Run `npm install`.
+3. Provide a production `.env` or environment variables.
+4. Optionally extract a built web bundle into `./dist`.
+5. Start the server with:
+
+```bash
+npm start
+```
+
+Use `npm run dev` only for local development.
 
 ## Typical Local Development Setup
 
